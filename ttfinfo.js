@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /*
- * Internal utility qu quickly check ttf tables size
+ * Internal utility to quickly check ttf tables size
  */
 
 'use strict';
@@ -16,7 +16,7 @@ var ArgumentParser = require('argparse').ArgumentParser;
 var parser = new ArgumentParser({
   version: require('./package.json').version,
   addHelp: true,
-  description: 'Dupm TTF tables info'
+  description: 'Dump TTF tables info'
 });
 
 parser.addArgument(
