@@ -1,3 +1,15 @@
+
+
+- [svg2ttf](#svg2ttf)
+	- [Using from CLI](#using-from-cli)
+		- [svg2ttf(svgFontString, options) -> buf](#svg2ttfsvgfontstring-options-->-buf)
+	- [API](#api)
+	- [Authors](#authors)
+	- [License](#license)
+
+> **Table of Contents**  *generated with [DocToc](http://doctoc.herokuapp.com/)*
+
+
 svg2ttf
 ========
 
