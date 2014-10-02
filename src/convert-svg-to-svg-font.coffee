@@ -30,62 +30,88 @@ T                         = require 'coffeenode-teacup'
 #===========================================================================================================
 # OPTIONS
 #-----------------------------------------------------------------------------------------------------------
+module    = 36
+em_size   = 4096
 options =
   ### Coordinates of first glyph outline: ###
-  'offset':       [ 48, 25.89, ]
+  'offset':           [ module * 5, module * 5, ]
   ### Size of grid and font design size: ###
-  'module':       12
-  'scale':        256 / 12
+  'module':           module
+  # 'scale':            256 / module
+  # 'scale':            1024 / module
+  'em-size':          em_size
+  ### Number of glyph rows between two rulers plus one: ###
+  'block-height':     9
   ### CID of first glyph outline: ###
-  'cid0':         0xe000
-  'row-length':   16
+  'cid0':             0xe000
+  'row-length':       16
+  'ascent':           +0.8 * em_size
+  'descent':          -0.2 * em_size
 
+#...........................................................................................................
+options[ 'scale' ] = em_size / module
 
 #===========================================================================================================
 #
 #-----------------------------------------------------------------------------------------------------------
 @load = ( source ) ->
-  glyphs      = []
+  glyphs      = {}
+  fallback    = null
+  max_cid     = -Infinity
   parser      = new DOMParser()
   doc         = parser.parseFromString( source, 'application/xml' )
-  select      = select = xpath.useNamespaces 'SVG': 'http://www.w3.org/2000/svg'
-  selector    = '/SVG:svg/SVG:path'
+  select      = xpath.useNamespaces 'SVG': 'http://www.w3.org/2000/svg'
+  selector    = '//*[local-name()="path"]'
+  selector    = '/*[local-name()="svg"]/*[local-name()="path"]'
+  selector    = '//*[local-name()="path"]'
   paths       = select selector, doc
   path_count  = paths.length
   paths       = ( path for path in paths when not /^x-/.test path.getAttribute 'id' )
   debug "found #{paths.length} outlines"
   debug "skipped #{path_count - paths.length} non-outline elements"
+  process.exit()
+  rows = {} # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
   #.........................................................................................................
   for path in paths
-    d = path.getAttribute 'd'
-    path = new SvgPath d
-      # .scale 0.5
-      # .translate 100, 200
-      .abs()
-      # .round 0
-      # .rel()
-      # .round(1) # Fix js floating point error/garbage after rel()
-      # .toString()
-    # debug JSON.stringify path
-    # debug path.toString()
-    # help @points_from_absolute_path path
+    d           = path.getAttribute 'd'
+    path        = ( new SvgPath d ).abs()
     center      = @center_from_absolute_path path
     [ x, y, ]   = center
     x          -= options[ 'offset' ][ 0 ]
     y          -= options[ 'offset' ][ 1 ]
     col         = Math.floor x / options[ 'module' ]
     row         = Math.floor y / options[ 'module' ]
-    cid         = options[ 'cid0' ] + row * options[ 'row-length' ] + col
+    block_count = row // options[ 'block-height' ]
+    actual_row  = row - block_count
+    # unless rows[ row ]? # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    #   rows[ row ] = 1 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    cid         = options[ 'cid0' ] + actual_row * options[ 'row-length' ] + col
+    max_cid     = Math.max max_cid, cid
     dx          = - ( col * options[ 'module' ] ) - options[ 'offset' ][ 0 ]
     dy          = - ( row * options[ 'module' ] ) - options[ 'offset' ][ 1 ]
     path        = path
       .translate  dx, dy
-      # .scale      options[ 'scale' ]
-      .round      5
+      .scale      1, -1
+      .translate  0, options[ 'module' ]
+      .scale      options[ 'scale' ]
+      .round      0
     # echo ( T.$marker center, 3 ), [ col, row, CHR.as_ncr cid ]
     # debug path
-    glyphs.push [ cid, path, ]
+    ### !!! ###
+    # debug '0x' + ( cid.toString 16 ), [ col, row, ], actual_row, block_count
+    if cid < options[ 'cid0' ]
+      fallback = path
+    else
+      if glyphs[ cid ]?
+        # throw new Error "duplicate CID: 0x#{cid.toString 16}"
+        warn "duplicate CID: 0x#{cid.toString 16}"
+      glyphs[ cid ] = [ cid, path, ]
+    ### !!! ###
   #.........................................................................................................
+  for cid in [ options[ 'cid0' ] .. max_cid ]
+    glyphs[ cid ]?= [ cid, fallback, ]
+  #.........................................................................................................
+  glyphs = ( entry for _, entry of glyphs )
   glyphs.sort ( a, b ) ->
     return +1 if a[ 0 ] > b[ 0 ]
     return -1 if a[ 0 ] < b[ 0 ]
@@ -226,7 +252,7 @@ T.DEFS = ( P... ) ->
 T.FONT = ( P... ) ->
   Q =
     'id':             'jizura2svg'
-    'horiz-adv-x':    options[ 'module' ]
+    'horiz-adv-x':    options[ 'module' ] * options[ 'scale' ]
     # 'horiz-origin-x':   0
     # 'horiz-origin-y':   0
     # 'vert-origin-x':    0
@@ -238,10 +264,10 @@ T.FONT = ( P... ) ->
 T.FONT_FACE = ->
   Q =
     'id':             'jizura2svg'
-    'units-per-em':   options[ 'module' ]
+    'units-per-em':   options[ 'module' ] * options[ 'scale' ]
     ### TAINT probably wrong values ###
-    'ascent':         options[ 'module' ] - 2
-    'descent':        -2
+    'ascent':         options[ 'ascent' ]
+    'descent':        options[ 'descent' ]
   ### TAINT kludge ###
   # return T.selfClosingTag 'font-face', Q
   return T.RAW ( T.render => T.TAG 'font-face', Q ).replace /><\/font-face>$/, ' />'
@@ -292,6 +318,7 @@ T.path = ( path ) ->
           T.FONT_FACE()
           T.TEXT '\n'
           for [ cid, path, ] in glyphs
+            T.RAW "<!-- #{cid.toString 16} -->"
             T.GLYPH cid, path
             T.TEXT '\n'
         T.TEXT '\n'
@@ -323,7 +350,10 @@ T.path = ( path ) ->
 
 ############################################################################################################
 unless module.parent?
-  source = ( require 'fs' ).readFileSync './test/first.svg', encoding: 'utf-8'
+  # source = ( require 'fs' ).readFileSync './test/first.svg', encoding: 'utf-8'
+  # source = ( require 'fs' ).readFileSync '/Volumes/Storage/jizura-materials-2/jizura-font/jizura2-designsheet-5.svg', encoding: 'utf-8'
+  source = ( require 'fs' ).readFileSync '/Volumes/Storage/jizura-materials-2/jizura-font-v3/jizura3-0000.svg', encoding: 'utf-8'
+  # source = ( require 'fs' ).readFileSync '/tmp/x-designsheet-5.svg', encoding: 'utf-8'
   # source = ( require 'fs' ).readFileSync '/private/tmp/jizura2-designsheet-5 copy 2.svg', encoding: 'utf-8'
   @load source
 
