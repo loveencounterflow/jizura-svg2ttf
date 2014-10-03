@@ -59,23 +59,30 @@ options[ 'scale' ] = em_size / module
 #
 #-----------------------------------------------------------------------------------------------------------
 @load = ( input_routes... ) ->
-  glyphs      = {}
-  parser      = new DOMParser()
-  select      = xpath.useNamespaces 'SVG': 'http://www.w3.org/2000/svg'
-  selector    = '//SVG:svg/SVG:path'
+  glyphs          = {}
+  glyph_count     = 0
+  parser          = new DOMParser()
+  select          = xpath.useNamespaces 'SVG': 'http://www.w3.org/2000/svg'
+  selector        = '//SVG:svg/SVG:path'
+  fallback        = null
+  fallback_count  = 0
+  fallback_source = null
+  min_cid         = +Infinity
+  max_cid         = -Infinity
   #.........................................................................................................
   for route in input_routes
-    filename    = njs_path.basename route
-    cid0        = @_cid0_from_route route
-    continue
-    source      = njs_fs.readFileSync route, encoding: 'utf-8'
-    fallback    = null
-    max_cid     = -Infinity
-    doc         = parser.parseFromString( source, 'application/xml' )
-    paths       = select selector, doc
-    path_count  = paths.length
-    help "found #{paths.length} outlines in #{filename}"
-    #.........................................................................................................
+    local_min_cid     = +Infinity
+    local_max_cid     = -Infinity
+    local_glyph_count = 0
+    filename          = njs_path.basename route
+    continue unless filename is 'jizura3-e200.svg' # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    cid0              = @_cid0_from_route route
+    source            = njs_fs.readFileSync route, encoding: 'utf-8'
+    doc               = parser.parseFromString( source, 'application/xml' )
+    paths             = select selector, doc
+    path_count        = paths.length
+    info "#{filename}: found #{paths.length} outlines"
+    #.......................................................................................................
     for path in paths
       d             = path.getAttribute 'd'
       path          = ( new SvgPath d ).abs()
@@ -87,8 +94,7 @@ options[ 'scale' ] = em_size / module
       row           = Math.floor y / options[ 'module' ]
       block_count   = row // options[ 'block-height' ]
       actual_row    = row - block_count
-      cid           = options[ 'cid0' ] + row * options[ 'row-length' ] + col
-      max_cid       = Math.max max_cid, cid
+      cid           = cid0 + actual_row * options[ 'row-length' ] + col
       dx            = - ( col * options[ 'module' ] ) - options[ 'offset' ][ 0 ]
       dy            = - ( row * options[ 'module' ] ) - options[ 'offset' ][ 1 ]
       path          = path
@@ -98,20 +104,41 @@ options[ 'scale' ] = em_size / module
         .scale      options[ 'scale' ]
         .round      0
       #.....................................................................................................
-      if cid < options[ 'cid0' ]
-        prefix    = if fallback? then 're-' else ''
-        fallback  = path
-        help "#{prefix}assigned fallback from #{filename}"
+      if cid < cid0
+        prefix          = if fallback? then 're-' else ''
+        fallback        = path
+        fallback_source = filename
+        help "#{filename}: #{prefix}assigned fallback"
       #.....................................................................................................
       else
+        min_cid       = Math.min       min_cid, cid
+        max_cid       = Math.max       max_cid, cid
+        local_min_cid = Math.min local_min_cid, cid
+        local_max_cid = Math.max local_max_cid, cid
         if glyphs[ cid ]?
-          warn "duplicate CID: 0x#{cid.toString 16} in #{filename}"
-        glyphs[ cid ] = [ cid, path, ]
+          warn "#{filename}: duplicate CID: 0x#{cid.toString 16}"
+        else
+          glyphs[ cid ]       = [ cid, path, ]
+          glyph_count        += 1
+          local_glyph_count  += 1
+    #.......................................................................................................
+    if local_glyph_count > 0
+      min_cid_hex = '0x' + local_min_cid.toString 16
+      max_cid_hex = '0x' + local_max_cid.toString 16
+      help "#{filename}: added #{glyph_count} glyph outlines in [ #{min_cid_hex} .. #{max_cid_hex} ]"
+    else
+      warn "#{filename}: no glyphs found"
   #.........................................................................................................
-  # debug glyphs
+  if glyph_count is 0
+    warn "no glyphs found; terminating"
+    return null
   #.........................................................................................................
-  for cid in [ options[ 'cid0' ] .. max_cid ]
-    glyphs[ cid ]?= [ cid, fallback, ]
+  for cid in [ min_cid .. max_cid ]
+    unless glyphs[ cid ]?
+      glyphs[ cid ]   = [ cid, fallback, ]
+      fallback_count += 1
+  if fallback_count > 0
+    help "filled #{fallback_count} positions with fallback outline from #{fallback_source}"
   #.........................................................................................................
   glyphs = ( entry for _, entry of glyphs )
   glyphs.sort ( a, b ) ->
@@ -129,9 +156,7 @@ options[ 'scale' ] = em_size / module
   R = parseInt match[ 1 ], 16
   unless 0x0000 <= R <= 0x10ffff
     throw new Error "illegal CID in route #{rpr route}"
-  debug R, match
-  # process.exit()
-  # return R
+  return R
 
 #===========================================================================================================
 #
