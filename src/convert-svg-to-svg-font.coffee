@@ -47,7 +47,6 @@ options =
   ### Number of glyph rows between two rulers plus one: ###
   'block-height':     9
   ### CID of first glyph outline: ###
-  'cid0':             0xe000
   'row-length':       16
   'em-size':          em_size
   'ascent':           +0.8 * em_size
@@ -67,6 +66,8 @@ options[ 'scale' ] = em_size / module
   #.........................................................................................................
   for route in input_routes
     filename    = njs_path.basename route
+    cid0        = @_cid0_from_route route
+    continue
     source      = njs_fs.readFileSync route, encoding: 'utf-8'
     fallback    = null
     max_cid     = -Infinity
@@ -103,12 +104,11 @@ options[ 'scale' ] = em_size / module
         help "#{prefix}assigned fallback from #{filename}"
       #.....................................................................................................
       else
-        debug rpr cid
         if glyphs[ cid ]?
           warn "duplicate CID: 0x#{cid.toString 16} in #{filename}"
         glyphs[ cid ] = [ cid, path, ]
   #.........................................................................................................
-  debug glyphs
+  # debug glyphs
   #.........................................................................................................
   for cid in [ options[ 'cid0' ] .. max_cid ]
     glyphs[ cid ]?= [ cid, fallback, ]
@@ -120,6 +120,18 @@ options[ 'scale' ] = em_size / module
     return  0
   #.........................................................................................................
   echo @f glyphs
+
+#-----------------------------------------------------------------------------------------------------------
+@_cid0_from_route = ( route ) ->
+  match = route.match /-([0-9a-f]+)\.svg$/
+  unless match?
+    throw new Error "unable to parse route #{rpr route}"
+  R = parseInt match[ 1 ], 16
+  unless 0x0000 <= R <= 0x10ffff
+    throw new Error "illegal CID in route #{rpr route}"
+  debug R, match
+  # process.exit()
+  # return R
 
 #===========================================================================================================
 #
