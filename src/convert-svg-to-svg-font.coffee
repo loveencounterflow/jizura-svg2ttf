@@ -2,8 +2,10 @@
 
 
 ############################################################################################################
-# _                         = require 'lodash'
-DOMParser                 = ( require 'xmldom' ).DOMParser
+njs_fs                    = require 'fs'
+njs_path                  = require 'path'
+#...........................................................................................................
+DOMParser                 = ( require 'xmldom-silent' ).DOMParser
 math                      = require './math'
 xpath                     = require 'xpath'
 #...........................................................................................................
@@ -25,6 +27,9 @@ SvgPath                   = require 'svgpath'
 #...........................................................................................................
 ### https://github.com/loveencounterflow/coffeenode-teacup ###
 T                         = require 'coffeenode-teacup'
+#...........................................................................................................
+### https://github.com/isaacs/node-glob ###
+glob                      = require 'glob'
 
 
 #===========================================================================================================
@@ -34,17 +39,17 @@ module    = 36
 em_size   = 4096
 options =
   ### Coordinates of first glyph outline: ###
-  'offset':           [ module * 5, module * 5, ]
+  'offset':           [ module * 4, module * 4, ]
   ### Size of grid and font design size: ###
   'module':           module
   # 'scale':            256 / module
   # 'scale':            1024 / module
-  'em-size':          em_size
   ### Number of glyph rows between two rulers plus one: ###
   'block-height':     9
   ### CID of first glyph outline: ###
   'cid0':             0xe000
   'row-length':       16
+  'em-size':          em_size
   'ascent':           +0.8 * em_size
   'descent':          -0.2 * em_size
 
@@ -54,59 +59,56 @@ options[ 'scale' ] = em_size / module
 #===========================================================================================================
 #
 #-----------------------------------------------------------------------------------------------------------
-@load = ( source ) ->
+@load = ( input_routes... ) ->
   glyphs      = {}
-  fallback    = null
-  max_cid     = -Infinity
   parser      = new DOMParser()
-  doc         = parser.parseFromString( source, 'application/xml' )
   select      = xpath.useNamespaces 'SVG': 'http://www.w3.org/2000/svg'
-  selector    = '//*[local-name()="path"]'
-  selector    = '/*[local-name()="svg"]/*[local-name()="path"]'
-  selector    = '//*[local-name()="path"]'
-  paths       = select selector, doc
-  path_count  = paths.length
-  paths       = ( path for path in paths when not /^x-/.test path.getAttribute 'id' )
-  debug "found #{paths.length} outlines"
-  debug "skipped #{path_count - paths.length} non-outline elements"
-  process.exit()
-  rows = {} # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+  selector    = '//SVG:svg/SVG:path'
   #.........................................................................................................
-  for path in paths
-    d           = path.getAttribute 'd'
-    path        = ( new SvgPath d ).abs()
-    center      = @center_from_absolute_path path
-    [ x, y, ]   = center
-    x          -= options[ 'offset' ][ 0 ]
-    y          -= options[ 'offset' ][ 1 ]
-    col         = Math.floor x / options[ 'module' ]
-    row         = Math.floor y / options[ 'module' ]
-    block_count = row // options[ 'block-height' ]
-    actual_row  = row - block_count
-    # unless rows[ row ]? # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    #   rows[ row ] = 1 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    cid         = options[ 'cid0' ] + actual_row * options[ 'row-length' ] + col
-    max_cid     = Math.max max_cid, cid
-    dx          = - ( col * options[ 'module' ] ) - options[ 'offset' ][ 0 ]
-    dy          = - ( row * options[ 'module' ] ) - options[ 'offset' ][ 1 ]
-    path        = path
-      .translate  dx, dy
-      .scale      1, -1
-      .translate  0, options[ 'module' ]
-      .scale      options[ 'scale' ]
-      .round      0
-    # echo ( T.$marker center, 3 ), [ col, row, CHR.as_ncr cid ]
-    # debug path
-    ### !!! ###
-    # debug '0x' + ( cid.toString 16 ), [ col, row, ], actual_row, block_count
-    if cid < options[ 'cid0' ]
-      fallback = path
-    else
-      if glyphs[ cid ]?
-        # throw new Error "duplicate CID: 0x#{cid.toString 16}"
-        warn "duplicate CID: 0x#{cid.toString 16}"
-      glyphs[ cid ] = [ cid, path, ]
-    ### !!! ###
+  for route in input_routes
+    filename    = njs_path.basename route
+    source      = njs_fs.readFileSync route, encoding: 'utf-8'
+    fallback    = null
+    max_cid     = -Infinity
+    doc         = parser.parseFromString( source, 'application/xml' )
+    paths       = select selector, doc
+    path_count  = paths.length
+    help "found #{paths.length} outlines in #{filename}"
+    #.........................................................................................................
+    for path in paths
+      d             = path.getAttribute 'd'
+      path          = ( new SvgPath d ).abs()
+      center        = @center_from_absolute_path path
+      [ x, y, ]     = center
+      x            -= options[ 'offset' ][ 0 ]
+      y            -= options[ 'offset' ][ 1 ]
+      col           = Math.floor x / options[ 'module' ]
+      row           = Math.floor y / options[ 'module' ]
+      block_count   = row // options[ 'block-height' ]
+      actual_row    = row - block_count
+      cid           = options[ 'cid0' ] + row * options[ 'row-length' ] + col
+      max_cid       = Math.max max_cid, cid
+      dx            = - ( col * options[ 'module' ] ) - options[ 'offset' ][ 0 ]
+      dy            = - ( row * options[ 'module' ] ) - options[ 'offset' ][ 1 ]
+      path          = path
+        .translate  dx, dy
+        .scale      1, -1
+        .translate  0, options[ 'module' ]
+        .scale      options[ 'scale' ]
+        .round      0
+      #.....................................................................................................
+      if cid < options[ 'cid0' ]
+        prefix    = if fallback? then 're-' else ''
+        fallback  = path
+        help "#{prefix}assigned fallback from #{filename}"
+      #.....................................................................................................
+      else
+        debug rpr cid
+        if glyphs[ cid ]?
+          warn "duplicate CID: 0x#{cid.toString 16} in #{filename}"
+        glyphs[ cid ] = [ cid, path, ]
+  #.........................................................................................................
+  debug glyphs
   #.........................................................................................................
   for cid in [ options[ 'cid0' ] .. max_cid ]
     glyphs[ cid ]?= [ cid, fallback, ]
@@ -119,59 +121,8 @@ options[ 'scale' ] = em_size / module
   #.........................................................................................................
   echo @f glyphs
 
-  # for idx  < paths.length
-  #   path = paths[idx]
-  # fontElem = doc.getElementsByTagName("font")[0]
-  # throw new Error("unable to locate SVG font element")  unless fontElem?
-  # fontFaceElem = fontElem.getElementsByTagName("font-face")[0]
-  # font =
-  #   id: fontElem.getAttribute("id") or "fontello"
-  #   familyName: fontFaceElem.getAttribute("font-family") or "fontello"
-  #   glyphs: []
-  #   stretch: fontFaceElem.getAttribute("font-stretch") or "normal"
-
-
-  # # Doesn't work with complex content like <strong>Copyright:></strong><em>Fontello</em>
-  # font.metadata = metadata.textContent  if metadata and metadata.textContent
-
-  # # Get <font> numeric attributes
-  # attributes =
-  #   width: "horiz-adv-x"
-
-  #   #height:       'vert-adv-y',
-  #   horizOriginX: "horiz-origin-x"
-  #   horizOriginY: "horiz-origin-y"
-  #   vertOriginX: "vert-origin-x"
-  #   vertOriginY: "vert-origin-y"
-
-  # _.forEach attributes, (val, key) ->
-  #   font[key] = parseInt(fontElem.getAttribute(val), 10)  if fontElem.hasAttribute(val)
-  #   return
-
-
-  # # Get <font-face> numeric attributes
-  # attributes =
-  #   ascent: "ascent"
-  #   descent: "descent"
-  #   unitsPerEm: "units-per-em"
-
-  # _.forEach attributes, (val, key) ->
-  #   font[key] = parseInt(fontFaceElem.getAttribute(val), 10)  if fontFaceElem.hasAttribute(val)
-  #   return
-
-  # font.weightClass = fontFaceElem.getAttribute("font-weight")  if fontFaceElem.hasAttribute("font-weight")
-  # missingGlyphElem = fontElem.getElementsByTagName("missing-glyph")[0]
-  # if missingGlyphElem
-  #   font.missingGlyph = {}
-  #   font.missingGlyph.d = missingGlyphElem.getAttribute("d") or ""
-  #   font.missingGlyph.width = parseInt(missingGlyphElem.getAttribute("horiz-adv-x"), 10)  if missingGlyphElem.getAttribute("horiz-adv-x")
-  # _.forEach fontElem.getElementsByTagName("glyph"), (glyphElem) ->
-  #   font.glyphs.push getGlyph(glyphElem)
-  #   return
-
-  # font
-
-
+#===========================================================================================================
+#
 #-----------------------------------------------------------------------------------------------------------
 @center_from_absolute_path = ( path ) ->
   return @center_from_absolute_points @points_from_absolute_path path
@@ -350,28 +301,13 @@ T.path = ( path ) ->
 
 ############################################################################################################
 unless module.parent?
-  # source = ( require 'fs' ).readFileSync './test/first.svg', encoding: 'utf-8'
-  # source = ( require 'fs' ).readFileSync '/Volumes/Storage/jizura-materials-2/jizura-font/jizura2-designsheet-5.svg', encoding: 'utf-8'
-  source = ( require 'fs' ).readFileSync '/Volumes/Storage/jizura-materials-2/jizura-font-v3/jizura3-0000.svg', encoding: 'utf-8'
-  # source = ( require 'fs' ).readFileSync '/tmp/x-designsheet-5.svg', encoding: 'utf-8'
-  # source = ( require 'fs' ).readFileSync '/private/tmp/jizura2-designsheet-5 copy 2.svg', encoding: 'utf-8'
-  @load source
+  # source = ( require 'fs' ).readFileSync '/Volumes/Storage/jizura-materials-2/jizura-font-v3/jizura3-0000.svg', encoding: 'utf-8'
+  # source = ( require 'fs' ).readFileSync '/tmp/test-e000.svg', encoding: 'utf-8'
+  # source = ( require 'fs' ).readFileSync '/Volumes/Storage/jizura-materials-2/jizura-font-v3/jizura3-e000.svg', encoding: 'utf-8'
 
-  # parser    = new DOMParser()
-  # doc       = parser.parseFromString source
-  # select    = select = xpath.useNamespaces 'SVG': 'http://www.w3.org/2000/svg'
-  # # selector  = '//SVG:svg'
-  # # selector  = '//SVG:tspan/text()'
-  # # selector  = '//SVG:text[@id="info"]/tspan/text()'
-  # selector  = '//SVG:text[@id="info"]/SVG:tspan/text()'
-  # nodes     = select selector, doc
-  # warn rpr ( node.toString() for node in nodes )
-
-  # info T.render => T.DIV 'helo'
-  # info T.render => T.SVG 'helo'
-  # info T.render => T.SVG => T.RAW '&#xhelo;'
-  # TRM.dir T
-
+  route_glob = '/Volumes/Storage/jizura-materials-2/jizura-font-v3/jizura3-*([0-9a-f]).svg'
+  routes = glob.sync route_glob
+  @load routes...
 
 
 
