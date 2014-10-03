@@ -1,12 +1,21 @@
 
 
+    # "coffee-script": "^1.8.0",
+    # "coffeenode-chr": "^0.1.3",
+    # "coffeenode-teacup": "0.0.17",
+    # "coffeenode-trm": "^0.1.20",
+    # "glob": "^4.0.6",
+    # "svgpath": "~ 1.0.0",
+    # "xmldom-silent": "~ 0.1.16",
+    # "xpath": "0.0.7"
+
+
 
 ############################################################################################################
 njs_fs                    = require 'fs'
 njs_path                  = require 'path'
 #...........................................................................................................
 DOMParser                 = ( require 'xmldom-silent' ).DOMParser
-math                      = require './math'
 xpath                     = require 'xpath'
 #...........................................................................................................
 CHR                       = require 'coffeenode-chr'
@@ -69,13 +78,14 @@ options[ 'scale' ] = em_size / module
   fallback_source = null
   min_cid         = +Infinity
   max_cid         = -Infinity
+  font_name       = @_font_name_from_route routes[ 0 ]
+  info "reading files for font #{rpr font_name}"
   #.........................................................................................................
   for route in input_routes
     local_min_cid     = +Infinity
     local_max_cid     = -Infinity
     local_glyph_count = 0
     filename          = njs_path.basename route
-    continue unless filename is 'jizura3-e200.svg' # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     cid0              = @_cid0_from_route route
     source            = njs_fs.readFileSync route, encoding: 'utf-8'
     doc               = parser.parseFromString( source, 'application/xml' )
@@ -108,7 +118,7 @@ options[ 'scale' ] = em_size / module
         prefix          = if fallback? then 're-' else ''
         fallback        = path
         fallback_source = filename
-        help "#{filename}: #{prefix}assigned fallback"
+        whisper "#{filename}: #{prefix}assigned fallback"
       #.....................................................................................................
       else
         min_cid       = Math.min       min_cid, cid
@@ -125,7 +135,7 @@ options[ 'scale' ] = em_size / module
     if local_glyph_count > 0
       min_cid_hex = '0x' + local_min_cid.toString 16
       max_cid_hex = '0x' + local_max_cid.toString 16
-      help "#{filename}: added #{glyph_count} glyph outlines in [ #{min_cid_hex} .. #{max_cid_hex} ]"
+      help "#{filename}: added #{local_glyph_count} glyph outlines in [ #{min_cid_hex} .. #{max_cid_hex} ]"
     else
       warn "#{filename}: no glyphs found"
   #.........................................................................................................
@@ -138,7 +148,11 @@ options[ 'scale' ] = em_size / module
       glyphs[ cid ]   = [ cid, fallback, ]
       fallback_count += 1
   if fallback_count > 0
-    help "filled #{fallback_count} positions with fallback outline from #{fallback_source}"
+    whisper "filled #{fallback_count} positions with fallback outline from #{fallback_source}"
+  min_cid_hex = '0x' + min_cid.toString 16
+  max_cid_hex = '0x' + max_cid.toString 16
+  help "added #{glyph_count} glyph outlines in [ #{min_cid_hex} .. #{max_cid_hex} ]"
+  help "writing SVG"
   #.........................................................................................................
   glyphs = ( entry for _, entry of glyphs )
   glyphs.sort ( a, b ) ->
@@ -146,7 +160,21 @@ options[ 'scale' ] = em_size / module
     return -1 if a[ 0 ] < b[ 0 ]
     return  0
   #.........................................................................................................
-  echo @f glyphs
+  svg     = @svg_from_name_and_glyphs font_name, glyphs
+  svg2ttf = require '../index.js'
+  ttf     = svg2ttf svg
+  njs_fs.writeFileSync '/tmp/jizura3.ttf', new Buffer ttf.buffer
+  # echo svg
+
+#-----------------------------------------------------------------------------------------------------------
+@_font_name_from_route = ( route ) ->
+  match = route.match /([^\/]+)-[0-9a-f]+?\.svg$/
+  unless match?
+    throw new Error "unable to parse route #{rpr route}"
+  R = match[ 1 ]
+  unless R.length > 0
+    throw new Error "illegal font name in route #{rpr route}"
+  return R
 
 #-----------------------------------------------------------------------------------------------------------
 @_cid0_from_route = ( route ) ->
@@ -237,9 +265,9 @@ T.DEFS = ( P... ) ->
   return T.TAG 'defs', P...
 
 #-----------------------------------------------------------------------------------------------------------
-T.FONT = ( P... ) ->
+T.FONT = ( font_name, P... ) ->
   Q =
-    'id':             'jizura2svg'
+    'id':             font_name
     'horiz-adv-x':    options[ 'module' ] * options[ 'scale' ]
     # 'horiz-origin-x':   0
     # 'horiz-origin-y':   0
@@ -249,9 +277,9 @@ T.FONT = ( P... ) ->
   return T.TAG 'font', Q, P...
 
 #-----------------------------------------------------------------------------------------------------------
-T.FONT_FACE = ->
+T.FONT_FACE = ( font_family ) ->
   Q =
-    'id':             'jizura2svg'
+    'font-family':    font_family
     'units-per-em':   options[ 'module' ] * options[ 'scale' ]
     ### TAINT probably wrong values ###
     'ascent':         options[ 'ascent' ]
@@ -291,7 +319,7 @@ T.path = ( path ) ->
 #         return method P...
 
 #-----------------------------------------------------------------------------------------------------------
-@f = ( glyphs ) ->
+@svg_from_name_and_glyphs = ( font_name, glyphs ) ->
   return T.render =>
     #.........................................................................................................
     T.RAW """<?xml version="1.0" encoding="utf-8"?>\n"""
@@ -301,9 +329,9 @@ T.path = ( path ) ->
       T.TEXT '\n'
       T.DEFS =>
         T.TEXT '\n'
-        T.FONT =>
+        T.FONT font_name, =>
           T.TEXT '\n'
-          T.FONT_FACE()
+          T.FONT_FACE font_name
           T.TEXT '\n'
           for [ cid, path, ] in glyphs
             T.RAW "<!-- #{cid.toString 16} -->"

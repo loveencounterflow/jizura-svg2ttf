@@ -17,7 +17,7 @@ var debug   = TRM.get_logger( 'debug', 'svg2ttf' )
 function svg2ttf(svgString, options) {
   var font = new sfnt.Font();
   var svgFont = svg.load(svgString);
-  debug( '©4e2', svgFont );
+  // debug( '©4e2', svgFont );
 
   options = options || {};
 
